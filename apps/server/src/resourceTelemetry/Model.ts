@@ -506,9 +506,12 @@ export function mergeProcesses(input: MergeProcessesInput): MergeProcessesResult
             ? "electron-main"
             : electronMetric
               ? electronCategory(electronMetric)
-              : isElectronDescendant(process.pid, processesByPid, electronPids)
-                ? inferredElectronCategory(process)
-                : "server-child";
+              : process.origin === "backend"
+                ? "server-child"
+                : process.origin === "desktop" ||
+                    isElectronDescendant(process.pid, processesByPid, electronPids)
+                  ? inferredElectronCategory(process)
+                  : "server-child";
     const firstSeenAt = previous?.process.firstSeenAt ?? DateTime.makeUnsafe(sampledAtMs);
     const preservePreviousRates = !input.updatePrevious && previous !== undefined;
     const cpuPercent = preservePreviousRates

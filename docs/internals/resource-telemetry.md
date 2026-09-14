@@ -32,6 +32,10 @@ unconstrained states. Headless servers leave unavailable power data unknown.
   Electron and native start times have different precision, so merging allows a
   small tolerance. Process signaling rechecks the native identity with a fresh
   sample.
+- The native collector retains observed live identities after reparenting, including
+  whether they originated under the backend or desktop. A process leaving the
+  current tree is not an exit. This ownership lasts only for that collector's
+  lifetime; it cannot recover processes orphaned before collection began.
 - Snapshot sequence numbers belong to a monitor generation. Comparing them across
   restarts would discard the new monitor's samples until its sequence caught up.
 - Sampling can miss a process that starts and exits between samples. Cumulative

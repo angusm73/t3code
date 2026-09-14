@@ -149,6 +149,61 @@ struct ProcessSample {
     io_read_bytes: u64,
     io_write_bytes: u64,
     io_semantics: IoSemantics,
+    origin: ProcessOrigin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum ProcessOrigin {
+    Backend,
+    Desktop,
+}
+
+#[derive(Default)]
+struct ProcessTracker {
+    identities: HashMap<u32, (u64, ProcessOrigin)>,
+}
+
+impl ProcessTracker {
+    fn select(
+        &mut self,
+        rows: &[(u32, u32, u64)],
+        server_pid: u32,
+        external_roots: &HashSet<u32>,
+    ) -> HashSet<u32> {
+        let starts = rows
+            .iter()
+            .map(|(pid, _, start)| (*pid, *start))
+            .collect::<HashMap<_, _>>();
+        self.identities
+            .retain(|pid, (start, _)| starts.get(pid) == Some(start));
+
+        // Previously observed children remain roots after their parent exits.
+        // Keep only live identities, so this does not retain exited processes or reused PIDs.
+        let mut roots = external_roots.clone();
+        roots.insert(server_pid);
+        roots.extend(self.identities.keys());
+        let tracked = select_tracked_pids(rows, &roots);
+        let mut backend_roots = HashSet::from([server_pid]);
+        backend_roots.extend(
+            self.identities.iter().filter_map(|(pid, (_, origin))| {
+                (*origin == ProcessOrigin::Backend).then_some(*pid)
+            }),
+        );
+        let backend = select_tracked_pids(rows, &backend_roots);
+        self.identities = tracked
+            .iter()
+            .map(|pid| {
+                let origin = if backend.contains(pid) {
+                    ProcessOrigin::Backend
+                } else {
+                    ProcessOrigin::Desktop
+                };
+                (*pid, (starts[pid], origin))
+            })
+            .collect();
+        tracked
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -354,6 +409,7 @@ struct Collector {
     system: System,
     sequence: u64,
     cpu_baseline_refreshed_at: Option<Instant>,
+    tracker: ProcessTracker,
 }
 
 impl Collector {
@@ -362,6 +418,7 @@ impl Collector {
             system: System::new(),
             sequence: 0,
             cpu_baseline_refreshed_at: None,
+            tracker: ProcessTracker::default(),
         }
     }
 
@@ -448,12 +505,11 @@ impl Collector {
                 )
             })
             .collect::<Vec<_>>();
-        let mut roots = external_processes
+        let roots = external_processes
             .iter()
             .map(|process| process.pid)
             .collect::<HashSet<_>>();
-        roots.insert(config.root_pid);
-        let tracked = select_tracked_pids(&rows, &roots);
+        let tracked = self.tracker.select(&rows, config.root_pid, &roots);
         let tracked_process_count = tracked.len();
         let process_details = if cfg!(target_os = "linux") && !tracked.is_empty() {
             let monitor_pid = Pid::from_u32(std::process::id());
@@ -534,6 +590,7 @@ impl Collector {
                     io_read_bytes: disk_usage.total_read_bytes,
                     io_write_bytes: disk_usage.total_written_bytes,
                     io_semantics: io_semantics(),
+                    origin: self.tracker.identities[&pid].1,
                 })
             })
             .collect::<Vec<_>>();
@@ -984,6 +1041,52 @@ mod tests {
     }
 
     #[test]
+    fn retains_orphans_and_discovers_their_new_children() {
+        let mut tracker = ProcessTracker::default();
+        tracker.select(
+            &[(10, 1, 100), (11, 10, 110), (12, 11, 120)],
+            10,
+            &HashSet::new(),
+        );
+        let selected = tracker.select(
+            &[(10, 1, 100), (12, 1, 120), (13, 12, 130), (99, 1, 90)],
+            10,
+            &HashSet::new(),
+        );
+        assert_eq!(selected, HashSet::from([10, 12, 13]));
+        assert_eq!(tracker.identities[&12].1, ProcessOrigin::Backend);
+        assert_eq!(tracker.identities[&13].1, ProcessOrigin::Backend);
+        assert!(!tracker.identities.contains_key(&11));
+    }
+
+    #[test]
+    fn does_not_follow_a_reused_orphan_pid() {
+        let mut tracker = ProcessTracker::default();
+        tracker.select(&[(10, 1, 100), (11, 10, 110)], 10, &HashSet::new());
+        let selected = tracker.select(
+            &[(10, 1, 100), (11, 1, 200), (12, 11, 210)],
+            10,
+            &HashSet::new(),
+        );
+        assert_eq!(selected, HashSet::from([10]));
+        assert_eq!(tracker.identities.len(), 1);
+    }
+
+    #[test]
+    fn preserves_backend_and_desktop_origins_after_both_parents_exit() {
+        let mut tracker = ProcessTracker::default();
+        tracker.select(
+            &[(20, 1, 90), (10, 20, 100), (11, 10, 110), (21, 20, 120)],
+            10,
+            &HashSet::from([20]),
+        );
+        let selected = tracker.select(&[(11, 1, 110), (21, 1, 120)], 10, &HashSet::new());
+        assert_eq!(selected, HashSet::from([11, 21]));
+        assert_eq!(tracker.identities[&11].1, ProcessOrigin::Backend);
+        assert_eq!(tracker.identities[&21].1, ProcessOrigin::Desktop);
+    }
+
+    #[test]
     fn rejects_descendants_older_than_a_reused_parent_pid() {
         let rows = vec![
             (20, 1, 5_000),
@@ -1214,6 +1317,7 @@ mod tests {
             io_read_bytes: 0,
             io_write_bytes: 0,
             io_semantics: IoSemantics::Storage,
+            origin: ProcessOrigin::Backend,
         };
         let snapshot_bytes =
             std::mem::size_of::<SnapshotEvent>() + process.estimated_history_bytes();

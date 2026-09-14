@@ -85,6 +85,8 @@ export const ResourceMonitorProcessSample = Schema.Struct({
   ioReadBytes: NonNegativeInt,
   ioWriteBytes: NonNegativeInt,
   ioSemantics: Schema.Literals(["storage", "all-io"]),
+  /** Observed ancestry retained by the native collector across reparenting. */
+  origin: Schema.optionalKey(Schema.Literals(["backend", "desktop"])),
 });
 export type ResourceMonitorProcessSample = typeof ResourceMonitorProcessSample.Type;
 

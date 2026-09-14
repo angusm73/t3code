@@ -111,6 +111,38 @@ function merge(input: {
 }
 
 describe("resource telemetry process model", () => {
+  it("keeps reparented processes in their original groups without recording false exits", () => {
+    const samples = [
+      processSample({ pid: SERVER_PID, ppid: 1, startTimeMs: 1_000, origin: "backend" }),
+      processSample({ pid: 200, ppid: SERVER_PID, startTimeMs: 2_000, origin: "backend" }),
+      processSample({ pid: 301, ppid: 300, startTimeMs: 3_000, origin: "desktop" }),
+    ];
+    const first = merge({ native: nativeSnapshot(BASE_TIME_MS, samples) });
+    const second = merge({
+      previous: first,
+      native: nativeSnapshot(
+        BASE_TIME_MS + 1_000,
+        samples.map((sample) => ({ ...sample, ppid: 1, cpuTimeMs: 100 })),
+        2,
+      ),
+    });
+    expect(second.groups.backend.processCount).toBe(2);
+    expect(second.groups.electron.processCount).toBe(1);
+    expect(second.groups.allT3.processExits).toBe(0);
+    expect(second.groups.allT3.processStarts).toBe(3);
+    expect(second.groups.backend.cpuTimeMs).toBe(200);
+    expect(second.groups.electron.cpuTimeMs).toBe(100);
+    expect(second.processes.find((process) => process.identity.pid === 301)?.category).toBe(
+      "electron-utility",
+    );
+
+    const third = merge({
+      previous: second,
+      native: nativeSnapshot(BASE_TIME_MS + 2_000, [samples[0]!], 3),
+    });
+    expect(third.groups.allT3.processExits).toBe(2);
+  });
+
   it("builds complete descendant depths and isolates monitor overhead", () => {
     const result = merge({
       sidecarPid: 900,
