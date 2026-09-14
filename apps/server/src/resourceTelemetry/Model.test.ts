@@ -162,6 +162,65 @@ describe("resource telemetry process model", () => {
     });
     expect(third.groups.allT3.processExits).toBe(2);
   });
+  it.each([true, false])(
+    "keeps desktop-hosted backend descendants out of Electron totals (live metrics: %s)",
+    (liveMetrics) => {
+      const result = mergeProcesses({
+        serverPid: SERVER_PID,
+        sidecarPid: Option.some(900),
+        fallbackSampledAtMs: BASE_TIME_MS,
+        nativeSnapshot: Option.some(
+          nativeSnapshot(BASE_TIME_MS, [
+            processSample({ pid: 300, ppid: 1, startTimeMs: 1_000 }),
+            processSample({ pid: SERVER_PID, ppid: 300, startTimeMs: 2_000, cpuPercent: 1 }),
+            processSample({
+              pid: 200,
+              ppid: SERVER_PID,
+              startTimeMs: 3_000,
+              name: "claude",
+              cpuPercent: 2,
+            }),
+            processSample({ pid: 201, ppid: 200, startTimeMs: 4_000, name: "node", cpuPercent: 4 }),
+            processSample({
+              pid: 301,
+              ppid: 300,
+              startTimeMs: 5_000,
+              command: "electron --type=renderer",
+              cpuPercent: 8,
+            }),
+            processSample({ pid: 900, ppid: SERVER_PID, startTimeMs: 6_000, cpuPercent: 0.5 }),
+          ]),
+        ),
+        desktopSnapshot: liveMetrics
+          ? Option.some(
+              desktopSnapshot(BASE_TIME_MS, [
+                electronMetric({ pid: 300, creationTimeMs: 1_000, type: "Browser" }),
+                electronMetric({ pid: 301, creationTimeMs: 5_000, type: "Tab" }),
+              ]),
+            )
+          : Option.none(),
+        electronRootPids: new Set([300]),
+        electronRootStartTimes: new Map([[300, 1_000]]),
+        previous: new Map(),
+        counters: emptyTelemetryCounters(),
+        updatePrevious: true,
+      });
+
+      expect(
+        result.processes
+          .filter((process) => process.category === "server-child")
+          .map((process) => process.identity.pid),
+      ).toEqual([200, 201]);
+      expect(result.groups.backend.processCount).toBe(3);
+      expect(result.groups.backend.currentCpuPercent).toBe(7);
+      expect(result.groups.backend.currentRssBytes).toBe(3 * 1_024);
+      expect(result.groups.electron.processCount).toBe(2);
+      expect(result.groups.electron.currentCpuPercent).toBe(8);
+      expect(result.groups.monitor.processCount).toBe(1);
+      expect(result.groups.allT3.processCount).toBe(6);
+      expect(result.groups.allT3.currentCpuPercent).toBe(15.5);
+    },
+  );
 
   it("builds complete descendant depths and isolates monitor overhead", () => {
     const result = merge({
