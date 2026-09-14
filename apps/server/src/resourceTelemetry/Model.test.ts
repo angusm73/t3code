@@ -222,6 +222,74 @@ describe("resource telemetry process model", () => {
     },
   );
 
+  it("keeps macOS footprint separate from resident memory", () => {
+    const result = merge({
+      native: nativeSnapshot(BASE_TIME_MS, [
+        processSample({
+          pid: SERVER_PID,
+          ppid: 1,
+          startTimeMs: 1_000,
+          residentBytes: 100,
+          physicalFootprintBytes: 500,
+        }),
+        processSample({
+          pid: 200,
+          ppid: SERVER_PID,
+          startTimeMs: 2_000,
+          residentBytes: 200,
+          physicalFootprintBytes: 800,
+        }),
+      ]),
+    });
+    expect(result.groups.allT3.currentRssBytes).toBe(300);
+    expect(result.groups.allT3.currentPhysicalFootprintBytes).toBe(1_300);
+    expect(
+      result.processes.find((process) => process.identity.pid === 200)?.physicalFootprintBytes,
+    ).toBe(800);
+  });
+
+  it("does not substitute RSS or a partial sum for an unavailable footprint", () => {
+    const result = merge({
+      sidecarPid: 900,
+      native: nativeSnapshot(BASE_TIME_MS, [
+        processSample({
+          pid: SERVER_PID,
+          ppid: 1,
+          startTimeMs: 1_000,
+          physicalFootprintBytes: 500,
+        }),
+        processSample({ pid: 900, ppid: SERVER_PID, startTimeMs: 2_000 }),
+      ]),
+    });
+    expect(result.groups.allT3.currentPhysicalFootprintBytes).toBeUndefined();
+    expect(result.groups.backend.currentPhysicalFootprintBytes).toBe(500);
+    expect(result.groups.monitor.currentPhysicalFootprintBytes).toBeUndefined();
+    expect(result.groups.electron.currentPhysicalFootprintBytes).toBeUndefined();
+  });
+
+  it("does not carry stale footprints into newer samples without that measurement", () => {
+    const first = merge({
+      native: nativeSnapshot(BASE_TIME_MS, [
+        processSample({
+          pid: SERVER_PID,
+          ppid: 1,
+          startTimeMs: 1_000,
+          physicalFootprintBytes: 500,
+        }),
+      ]),
+    });
+    const second = merge({
+      previous: first,
+      native: nativeSnapshot(
+        BASE_TIME_MS + 1_000,
+        [processSample({ pid: SERVER_PID, ppid: 1, startTimeMs: 1_000 })],
+        2,
+      ),
+    });
+    expect(second.processes[0]?.physicalFootprintBytes).toBeUndefined();
+    expect(second.groups.allT3.currentPhysicalFootprintBytes).toBeUndefined();
+  });
+
   it("builds complete descendant depths and isolates monitor overhead", () => {
     const result = merge({
       sidecarPid: 900,

@@ -87,6 +87,8 @@ export const ResourceMonitorProcessSample = Schema.Struct({
   cpuPercent: Schema.Number,
   cpuTimeMs: NonNegativeInt,
   residentBytes: NonNegativeInt,
+  /** macOS memory charge, including compressed and swapped pages; absent if unavailable. */
+  physicalFootprintBytes: Schema.optionalKey(NonNegativeInt),
   virtualBytes: NonNegativeInt,
   ioReadBytes: NonNegativeInt,
   ioWriteBytes: NonNegativeInt,
@@ -391,6 +393,7 @@ export const ResourceTelemetryProcess = Schema.Struct({
   cpuPercent: Schema.Number,
   cpuTimeMs: NonNegativeInt,
   residentBytes: NonNegativeInt,
+  physicalFootprintBytes: Schema.optionalKey(NonNegativeInt),
   peakResidentBytes: NonNegativeInt,
   virtualBytes: NonNegativeInt,
   ioReadBytes: NonNegativeInt,
@@ -410,6 +413,8 @@ export const ResourceTelemetryAggregate = Schema.Struct({
   currentCpuPercent: Schema.Number,
   cpuTimeMs: NonNegativeInt,
   currentRssBytes: NonNegativeInt,
+  /** Only present when every process in the group has a footprint measurement. */
+  currentPhysicalFootprintBytes: Schema.optionalKey(NonNegativeInt),
   peakRssBytes: NonNegativeInt,
   ioReadBytes: NonNegativeInt,
   ioWriteBytes: NonNegativeInt,

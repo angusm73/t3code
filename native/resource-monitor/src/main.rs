@@ -147,6 +147,8 @@ struct ProcessSample {
     cpu_percent: f32,
     cpu_time_ms: u64,
     resident_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    physical_footprint_bytes: Option<u64>,
     virtual_bytes: u64,
     io_read_bytes: u64,
     io_write_bytes: u64,
@@ -728,6 +730,7 @@ impl Collector {
                     cpu_percent: process.cpu_usage(),
                     cpu_time_ms: process.accumulated_cpu_time(),
                     resident_bytes: details.memory(),
+                    physical_footprint_bytes: physical_footprint_bytes(pid),
                     virtual_bytes: details.virtual_memory(),
                     io_read_bytes: disk_usage.total_read_bytes,
                     io_write_bytes: disk_usage.total_written_bytes,
@@ -768,6 +771,25 @@ impl Collector {
             processes,
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn physical_footprint_bytes(pid: u32) -> Option<u64> {
+    let pid = i32::try_from(pid).ok().filter(|pid| *pid > 0)?;
+    let mut usage = std::mem::MaybeUninit::<libc::rusage_info_v0>::uninit();
+    // libproc writes the complete v0 structure on success. Unlike RSS, this
+    // ledger includes the process's compressed and swapped memory charge.
+    let result =
+        unsafe { libc::proc_pid_rusage(pid, libc::RUSAGE_INFO_V0, usage.as_mut_ptr().cast()) };
+    if result != 0 {
+        return None;
+    }
+    Some(unsafe { usage.assume_init() }.ri_phys_footprint)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn physical_footprint_bytes(_pid: u32) -> Option<u64> {
+    None
 }
 
 // Keep CPU baselines separate. Even a metadata refresh resets Linux process times.
@@ -1397,6 +1419,17 @@ mod tests {
         assert!(!process.command.is_empty());
         assert!(process.resident_bytes > 0);
         assert!(process.cpu_percent.is_finite());
+        #[cfg(target_os = "macos")]
+        assert!(
+            process
+                .physical_footprint_bytes
+                .is_some_and(|bytes| bytes > 0)
+        );
+    }
+
+    #[test]
+    fn unavailable_footprint_is_not_reported_as_zero() {
+        assert_eq!(physical_footprint_bytes(u32::MAX), None);
     }
 
     #[test]
@@ -1574,6 +1607,7 @@ mod tests {
             cpu_percent: 0.0,
             cpu_time_ms: 0,
             resident_bytes: 0,
+            physical_footprint_bytes: None,
             virtual_bytes: 0,
             io_read_bytes: 0,
             io_write_bytes: 0,
