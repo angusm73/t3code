@@ -1,5 +1,6 @@
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { createThreadMovePlanner } from "./threadOrder";
+import { BackgroundWork } from "../diagnostics/BackgroundWork";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -123,10 +124,16 @@ interface ThreadNavigationSidebarProps {
  * column gets. Other platforms keep the custom header chrome.
  */
 export function ThreadNavigationSidebar(props: ThreadNavigationSidebarProps) {
-  if (Platform.OS !== "ios") {
-    return <ThreadNavigationSidebarPane {...props} nativeChrome={false} />;
-  }
-  return <NativeSidebarContainer {...props} />;
+  return (
+    <View className="flex-1 bg-drawer" style={{ width: props.width }}>
+      {Platform.OS !== "ios" ? (
+        <ThreadNavigationSidebarPane {...props} nativeChrome={false} />
+      ) : (
+        <NativeSidebarContainer {...props} />
+      )}
+      <BackgroundWork />
+    </View>
+  );
 }
 
 function NativeSidebarContainer(props: ThreadNavigationSidebarProps) {

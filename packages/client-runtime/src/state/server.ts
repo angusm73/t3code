@@ -1019,6 +1019,13 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:process-diagnostics",
       tag: WS_METHODS.serverGetProcessDiagnostics,
     }),
+    backgroundWork: createEnvironmentQueryAtomFamily(runtime, {
+      label: "environment-data:server:background-work",
+      idleTtlMs: 0,
+      staleTimeMs: 5_000,
+      execute: (input: EnvironmentRpcInput<typeof WS_METHODS.serverGetBackgroundWork>) =>
+        request(WS_METHODS.serverGetBackgroundWork, input).pipe(Effect.timeout("15 seconds")),
+    }),
     hostResources: createEnvironmentQueryAtomFamily(runtime, {
       label: "environment-data:server:host-resources",
       idleTtlMs: 0,

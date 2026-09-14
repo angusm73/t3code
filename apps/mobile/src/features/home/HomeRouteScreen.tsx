@@ -16,6 +16,7 @@ import { checkForAppUpdateOnLaunch, startAppUpdateForegroundRecheck } from "../u
 import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
 import { HomeHeader } from "./HomeHeader";
+import { BackgroundWork } from "../diagnostics/BackgroundWork";
 import { useHomeListOptions } from "./home-list-options";
 import { useHomeThreadSelection } from "./home-thread-navigation";
 import { buildHomeProjectScopes } from "./homeThreadList";
@@ -182,6 +183,7 @@ export function HomeRouteScreen() {
           onThreadSortOrderChange={setThreadSortOrder}
         />
 
+        <BackgroundWork />
         <HomeScreen
           catalogState={catalogState}
           environments={environments}

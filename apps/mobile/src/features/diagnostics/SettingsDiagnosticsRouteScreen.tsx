@@ -8,6 +8,7 @@ import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { SettingsSection } from "../settings/components/SettingsSection";
+import { BackgroundWork } from "./BackgroundWork";
 import {
   formatStartupCrashReport,
   parseStartupCrashRecords,
@@ -79,6 +80,7 @@ export function SettingsDiagnosticsRouteScreen() {
         className="flex-1"
         contentContainerClassName="gap-6 px-5 pt-4 pb-[18px]"
       >
+        <BackgroundWork />
         <SettingsSection title="Startup crashes">
           {state.status === "loading" ? (
             <View className="items-center gap-3 px-6 py-8">

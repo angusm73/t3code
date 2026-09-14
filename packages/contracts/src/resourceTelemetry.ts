@@ -481,6 +481,32 @@ export const ResourceTelemetrySnapshot = Schema.Struct({
 });
 export type ResourceTelemetrySnapshot = typeof ResourceTelemetrySnapshot.Type;
 
+export const BackgroundWorkProcess = Schema.Struct({
+  identity: ResourceTelemetryProcessIdentity,
+  owner: Schema.optionalKey(ResourceProcessOwner),
+  name: Schema.String,
+  cwd: Schema.optionalKey(Schema.String),
+  runTimeMs: NonNegativeInt,
+  cpuPercent: Schema.Number,
+  residentBytes: NonNegativeInt,
+  physicalFootprintBytes: Schema.optionalKey(NonNegativeInt),
+  ports: Schema.Array(PositiveInt),
+});
+export type BackgroundWorkProcess = typeof BackgroundWorkProcess.Type;
+
+export const BackgroundWorkSnapshot = Schema.Struct({
+  readAt: Schema.DateTimeUtc,
+  sampleAgeMs: NonNegativeInt,
+  collectorStatus: ResourceTelemetrySourceStatus,
+  processCount: NonNegativeInt,
+  residentBytes: NonNegativeInt,
+  physicalFootprintBytes: Schema.optionalKey(NonNegativeInt),
+  cpuPercent: Schema.Number,
+  processes: Schema.Array(BackgroundWorkProcess),
+  portsAvailable: Schema.Boolean,
+});
+export type BackgroundWorkSnapshot = typeof BackgroundWorkSnapshot.Type;
+
 export const ResourceTelemetryHistoryInput = Schema.Struct({
   windowMs: NonNegativeInt,
   bucketMs: NonNegativeInt,

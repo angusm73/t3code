@@ -182,6 +182,8 @@ import * as DesktopTelemetryReceiver from "./resourceTelemetry/DesktopTelemetryR
 import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClient.ts";
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import * as BackgroundWork from "./resourceTelemetry/BackgroundWork.ts";
+import * as ProcessRunner from "./processRunner.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as Data from "effect/Data";
@@ -843,7 +845,11 @@ const buildAppUnderTest = (options?: {
           }),
         ),
       ),
-      Layer.provide(
+      Layer.provide([
+        BackgroundWork.layer.pipe(
+          Layer.provide(resourceTelemetryLayer),
+          Layer.provide(ProcessRunner.layer),
+        ),
         Layer.mock(ProcessDiagnostics.ProcessDiagnostics)({
           read: Effect.succeed({
             serverPid: process.pid,
@@ -862,7 +868,7 @@ const buildAppUnderTest = (options?: {
               message: Option.none(),
             }),
         }),
-      ),
+      ]),
       Layer.provide([
         HostResources.layer,
         Layer.mock(ProcessResourceMonitor.ProcessResourceMonitor)({
@@ -6338,6 +6344,21 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(recovered.availableMemoryBytes, 35 * 4096);
       assert.equal(yield* Ref.get(commandCalls), 2);
     }).pipe(TestClock.withLive),
+  );
+
+  it.effect("routes compact background work summaries over the websocket", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.serverGetBackgroundWork]({ includeProcesses: false }),
+        ),
+      );
+      assert.equal(result.processCount, 0);
+      assert.deepEqual(result.processes, []);
+      assert.equal(result.portsAvailable, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket resource telemetry through the subscription", () =>

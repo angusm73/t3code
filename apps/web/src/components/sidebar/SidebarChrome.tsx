@@ -12,6 +12,7 @@ import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import { T3Wordmark } from "../T3Wordmark";
+import { BackgroundWork } from "../BackgroundWork";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -224,6 +225,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter className="px-[var(--sidebar-content-inset)] py-1">
+      <BackgroundWork />
       <div className="contents group-data-[collapsible=icon]:hidden">
         <SidebarProviderUpdatePill />
         <SidebarUpdateArchitectureWarning />

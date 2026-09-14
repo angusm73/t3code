@@ -235,6 +235,7 @@ import {
   ResourceTelemetryHistoryInput,
   ResourceTelemetryRetryResult,
   ResourceTelemetrySnapshot,
+  BackgroundWorkSnapshot,
 } from "./resourceTelemetry.ts";
 import {
   UsageLimitSourceError,
@@ -355,6 +356,7 @@ export const WS_METHODS = {
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
+  serverGetBackgroundWork: "server.getBackgroundWork",
   serverGetHostResources: "server.getHostResources",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverGetResourceTelemetryHistory: "server.getResourceTelemetryHistory",
@@ -573,6 +575,12 @@ const WsServerGetTraceDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetTraceDiagnos
 const WsServerGetProcessDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetProcessDiagnostics, {
   payload: Schema.Struct({}),
   success: ServerProcessDiagnosticsResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerGetBackgroundWorkRpc = Rpc.make(WS_METHODS.serverGetBackgroundWork, {
+  payload: Schema.Struct({ includeProcesses: Schema.Boolean }),
+  success: BackgroundWorkSnapshot,
   error: EnvironmentAuthorizationError,
 });
 
@@ -1318,6 +1326,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
+  WsServerGetBackgroundWorkRpc,
   WsServerGetHostResourcesRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerGetResourceTelemetryHistoryRpc,
