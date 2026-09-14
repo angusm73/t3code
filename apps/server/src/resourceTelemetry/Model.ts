@@ -355,6 +355,15 @@ function aggregate(
     currentCpuPercent: processes.reduce((total, process) => total + process.cpuPercent, 0),
     cpuTimeMs: counters.cpuTimeMs,
     currentRssBytes: processes.reduce((total, process) => total + process.residentBytes, 0),
+    ...(processes.length > 0 &&
+    processes.every((process) => process.physicalFootprintBytes !== undefined)
+      ? {
+          currentPhysicalFootprintBytes: processes.reduce(
+            (total, process) => total + process.physicalFootprintBytes!,
+            0,
+          ),
+        }
+      : {}),
     peakRssBytes: processes.reduce((total, process) => total + process.peakResidentBytes, 0),
     ioReadBytes: counters.ioReadBytes,
     ioWriteBytes: counters.ioWriteBytes,
@@ -535,6 +544,9 @@ export function mergeProcesses(input: MergeProcessesInput): MergeProcessesResult
       cpuPercent: finiteNonNegative(cpuPercent),
       cpuTimeMs: process.cpuTimeMs,
       residentBytes: process.residentBytes,
+      ...(process.physicalFootprintBytes !== undefined
+        ? { physicalFootprintBytes: process.physicalFootprintBytes }
+        : {}),
       peakResidentBytes: Math.max(
         process.residentBytes,
         electronMetric?.peakWorkingSetBytes ?? 0,

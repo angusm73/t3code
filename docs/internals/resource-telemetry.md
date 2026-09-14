@@ -28,6 +28,9 @@ unconstrained states. Headless servers leave unavailable power data unknown.
 
 ## Measurement traps
 
+- macOS RSS excludes compressed and swapped pages. The optional libproc physical
+  footprint reports that memory charge separately; never substitute RSS into a
+  footprint total when one process is unavailable. Neither sum is host memory used.
 - Process identity includes start time because operating systems reuse PIDs.
   Electron and native start times have different precision, so merging allows a
   small tolerance. Process signaling rechecks the native identity with a fresh

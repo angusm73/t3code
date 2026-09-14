@@ -292,7 +292,14 @@ function AggregateCard({
       </div>
       <div className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-2.5">
         <MetricPair label="CPU" value={`${aggregate.currentCpuPercent.toFixed(1)}%`} />
-        <MetricPair label="Memory" value={formatBytes(aggregate.currentRssBytes)} />
+        <MetricPair
+          label={
+            aggregate.currentPhysicalFootprintBytes === undefined
+              ? "Resident memory"
+              : "Memory footprint"
+          }
+          value={formatBytes(aggregate.currentPhysicalFootprintBytes ?? aggregate.currentRssBytes)}
+        />
         <MetricPair label="Read" value={formatRate(aggregate.ioReadBytesPerSecond)} />
         <MetricPair label="Write" value={formatRate(aggregate.ioWriteBytesPerSecond)} />
       </div>
@@ -646,7 +653,23 @@ function ProcessTable({
                 {formatCpuTime(process.cpuTimeMs)}
               </td>
               <td className="px-3 py-2 text-right font-mono tabular-nums">
-                {formatBytes(process.residentBytes)}
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span>
+                        {formatBytes(process.physicalFootprintBytes ?? process.residentBytes)}
+                      </span>
+                    }
+                  />
+                  <TooltipPopup side="top">
+                    {process.physicalFootprintBytes === undefined
+                      ? "Resident memory. Memory footprint is unavailable."
+                      : `macOS footprint, including compressed and swapped pages. Resident memory: ${formatBytes(process.residentBytes)}.`}
+                  </TooltipPopup>
+                </Tooltip>
+                <span className="block text-[9px] text-muted-foreground">
+                  {process.physicalFootprintBytes === undefined ? "RSS" : "footprint"}
+                </span>
               </td>
               <td className="px-3 py-2 text-right font-mono tabular-nums text-sky-700 dark:text-sky-300">
                 {formatRate(process.ioReadBytesPerSecond)}
@@ -711,7 +734,7 @@ function HistoryProcessTable({
             <th className="px-3 py-2 font-semibold">Category</th>
             <th className="px-3 py-2 text-right font-semibold">CPU Time</th>
             <th className="px-3 py-2 text-right font-semibold">Peak CPU</th>
-            <th className="px-3 py-2 text-right font-semibold">Peak Mem</th>
+            <th className="px-3 py-2 text-right font-semibold">Peak RSS</th>
             <th className="px-3 py-2 text-right font-semibold">Read</th>
             <th className="px-3 py-2 text-right font-semibold">Write</th>
             <th className="px-3 py-2 text-right font-semibold">Samples</th>
@@ -1026,10 +1049,22 @@ export function ResourceTelemetryDiagnostics({
             />
             <IconStat
               icon={<MemoryStickIcon className="size-3.5" />}
-              label="Resident memory"
-              value={allT3 ? formatBytes(allT3.currentRssBytes) : "..."}
+              label={
+                allT3?.currentPhysicalFootprintBytes === undefined
+                  ? "Resident memory"
+                  : "Memory footprint"
+              }
+              value={
+                allT3
+                  ? formatBytes(allT3.currentPhysicalFootprintBytes ?? allT3.currentRssBytes)
+                  : "..."
+              }
               detail={
-                allT3 ? `${formatBytes(allT3.peakRssBytes)} combined process peaks` : undefined
+                allT3
+                  ? allT3.currentPhysicalFootprintBytes === undefined
+                    ? "Footprint unavailable for one or more processes; showing resident memory."
+                    : `${formatBytes(allT3.currentRssBytes)} resident · footprint includes compressed and swapped pages`
+                  : undefined
               }
             />
             <IconStat
