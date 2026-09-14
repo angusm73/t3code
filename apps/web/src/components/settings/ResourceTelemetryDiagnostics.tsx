@@ -211,7 +211,7 @@ function SourceStatusBadge({
           tone === "danger" && "bg-destructive",
         )}
       />
-      {label} {presentation?.label ?? status}
+      {label} {presentation?.label ?? (status === "healthy" ? "Collecting" : status)}
     </span>
   );
 }
@@ -979,7 +979,7 @@ export function ResourceTelemetryDiagnostics({
         headerAction={
           <div className="flex items-center gap-2">
             {snapshot ? (
-              <SourceStatusBadge label="Native" status={snapshot.health.native.status} />
+              <SourceStatusBadge label="Collector" status={snapshot.health.native.status} />
             ) : null}
             <LastSampleLabel sampledAt={snapshot?.readAt ?? null} />
             <Tooltip>
@@ -1005,11 +1005,11 @@ export function ResourceTelemetryDiagnostics({
           <div className="flex flex-col gap-3 border-b border-border/60 bg-linear-to-r from-muted/45 via-muted/20 to-transparent px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
-                T3 system footprint
+                Tracked T3 processes
               </div>
               <p className="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground">
-                Live native counters for the server, providers, terminals, desktop processes, and
-                the monitor itself.
+                Counters for processes attributed to this T3 environment and its desktop host. These
+                totals do not represent all resource usage on the machine.
               </p>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-muted-foreground/65">
@@ -1022,7 +1022,11 @@ export function ResourceTelemetryDiagnostics({
               icon={<CpuIcon className="size-3.5" />}
               label="Current CPU"
               value={allT3 ? `${allT3.currentCpuPercent.toFixed(1)}%` : "..."}
-              detail={allT3 ? `${formatCpuTime(allT3.cpuTimeMs)} observed CPU time` : undefined}
+              detail={
+                allT3
+                  ? `${formatCpuTime(allT3.cpuTimeMs)} observed CPU time · 100% = one core`
+                  : undefined
+              }
             />
             <IconStat
               icon={<MemoryStickIcon className="size-3.5" />}
@@ -1098,7 +1102,7 @@ export function ResourceTelemetryDiagnostics({
       </SettingsSection>
 
       <SettingsSection
-        title="Host & collection"
+        title="Host power & collection"
         icon={<GaugeIcon className="size-4 text-muted-foreground" />}
         headerAction={
           collectorNeedsRetry ? (
@@ -1173,7 +1177,7 @@ export function ResourceTelemetryDiagnostics({
                 </div>
                 <p className="mt-1.5 max-w-sm text-[11px] leading-relaxed text-muted-foreground/70">
                   Power, idle, lock, and thermal state are supplied by the desktop host. Process
-                  telemetry remains fully active in this browser session.
+                  collection has a separate status below.
                 </p>
               </div>
             )}
@@ -1185,6 +1189,10 @@ export function ResourceTelemetryDiagnostics({
               </span>
               Collection health
             </div>
+            <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+              Collection status describes the monitor, not the machine's memory pressure or CPU
+              health. Processes orphaned before collection began may be missing from these totals.
+            </p>
             {snapshot ? (
               <>
                 <HealthSource label="Native process monitor" health={snapshot.health.native} />
@@ -1194,11 +1202,11 @@ export function ResourceTelemetryDiagnostics({
                   value={formatDurationMicros(snapshot.health.collectionDurationMicros)}
                 />
                 <DetailRow
-                  label="Process scan"
-                  value={`${snapshot.health.retainedProcessCount}/${snapshot.health.scannedProcessCount} retained`}
+                  label="Process coverage"
+                  value={`${snapshot.health.retainedProcessCount} tracked of ${snapshot.health.scannedProcessCount} scanned`}
                 />
                 <DetailRow
-                  label="Inaccessible"
+                  label="Unavailable tracked processes"
                   value={String(snapshot.health.inaccessibleProcessCount)}
                   valueClassName={
                     snapshot.health.inaccessibleProcessCount > 0
