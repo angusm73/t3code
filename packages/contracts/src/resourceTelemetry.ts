@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { HostPowerSnapshot } from "./background.ts";
 import { DesktopUpdateStateSchema } from "./ipc.ts";
 
@@ -70,6 +70,12 @@ export const ResourceMonitorCapabilities = Schema.Struct({
 });
 export type ResourceMonitorCapabilities = typeof ResourceMonitorCapabilities.Type;
 
+export const ResourceProcessOwner = Schema.Struct({
+  threadId: ThreadId,
+  terminalId: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type ResourceProcessOwner = typeof ResourceProcessOwner.Type;
+
 export const ResourceMonitorProcessSample = Schema.Struct({
   pid: PositiveInt,
   ppid: NonNegativeInt,
@@ -87,6 +93,8 @@ export const ResourceMonitorProcessSample = Schema.Struct({
   ioSemantics: Schema.Literals(["storage", "all-io"]),
   /** Observed ancestry retained by the native collector across reparenting. */
   origin: Schema.optionalKey(Schema.Literals(["backend", "desktop"])),
+  owner: Schema.optionalKey(ResourceProcessOwner),
+  cwd: Schema.optionalKey(Schema.String),
 });
 export type ResourceMonitorProcessSample = typeof ResourceMonitorProcessSample.Type;
 
@@ -94,6 +102,7 @@ export const ResourceMonitorConfigureCommand = Schema.Struct({
   version: Schema.Literal(RESOURCE_MONITOR_PROTOCOL_VERSION),
   type: Schema.Literal("configure"),
   rootPid: PositiveInt,
+  ownershipKey: Schema.optionalKey(TrimmedNonEmptyString),
   sampleIntervalMs: NonNegativeInt,
   externalProcesses: Schema.Array(ResourceMonitorExternalProcess),
 });
@@ -368,6 +377,8 @@ export type DesktopTelemetryControlMessage = typeof DesktopTelemetryControlMessa
 
 export const ResourceTelemetryProcess = Schema.Struct({
   identity: ResourceTelemetryProcessIdentity,
+  owner: Schema.optionalKey(ResourceProcessOwner),
+  cwd: Schema.optionalKey(Schema.String),
   ppid: NonNegativeInt,
   childPids: Schema.Array(PositiveInt),
   depth: NonNegativeInt,

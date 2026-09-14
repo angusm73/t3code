@@ -37,6 +37,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ResourceMonitorBinary from "./ResourceMonitorBinary.ts";
 import { ServerConfig } from "../config.ts";
+import { processOwnershipKey } from "./ProcessOwnership.ts";
 import { subscribeBeforeSnapshotWithoutMutex } from "../utils/subscribeBeforeSnapshot.ts";
 
 const SAMPLE_INTERVAL_MS = 1_000;
@@ -656,6 +657,7 @@ export const make = Effect.fn("resourceTelemetry.nativeTelemetryClient.make")(fu
               version: RESOURCE_MONITOR_PROTOCOL_VERSION,
               type: "configure",
               rootPid: process.pid,
+              ownershipKey: processOwnershipKey(config.stateDir),
               sampleIntervalMs: control.sampleIntervalMs,
               externalProcesses: [...(yield* Ref.get(externalProcesses))],
             });

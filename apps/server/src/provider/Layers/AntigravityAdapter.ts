@@ -36,6 +36,10 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { ServerConfig } from "../../config.ts";
+import {
+  processOwnershipKey,
+  withProcessOwnership,
+} from "../../resourceTelemetry/ProcessOwnership.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import type { AntigravityAuth } from "../AntigravityAuth.ts";
@@ -793,6 +797,11 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
                 cwd,
                 clientInfo: { name: "t3-code", version: "0.0.0" },
                 clientFileSystem: true,
+                processOwnershipEnvironment: withProcessOwnership(
+                  {},
+                  processOwnershipKey(serverConfig.stateDir),
+                  input.threadId,
+                ),
                 ...(mcp?.agentDeviceEnvironment
                   ? { agentDeviceEnvironment: mcp.agentDeviceEnvironment }
                   : {}),

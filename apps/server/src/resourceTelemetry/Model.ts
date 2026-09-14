@@ -525,6 +525,8 @@ export function mergeProcesses(input: MergeProcessesInput): MergeProcessesResult
         startTimeMs: process.startTimeMs,
       },
       ppid: process.ppid,
+      ...(process.owner ? { owner: process.owner } : {}),
+      ...(process.cwd !== undefined ? { cwd: process.cwd } : {}),
       childPids: [...(childrenByParent.get(process.pid) ?? [])].toSorted(
         (left, right) => left - right,
       ),

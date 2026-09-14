@@ -163,7 +163,10 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
             installation: executable,
             profile,
             cwd: input.cwd,
-            baseEnv: withAgentDeviceEnvironment(processEnvironment, input),
+            baseEnv: {
+              ...withAgentDeviceEnvironment(processEnvironment, input),
+              ...input.processOwnershipEnvironment,
+            },
             auth,
           }),
         }).pipe(Effect.provideService(Crypto.Crypto, crypto));

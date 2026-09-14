@@ -34,8 +34,12 @@ unconstrained states. Headless servers leave unavailable power data unknown.
   sample.
 - The native collector retains observed live identities after reparenting, including
   whether they originated under the backend or desktop. A process leaving the
-  current tree is not an exit. This ownership lasts only for that collector's
-  lifetime; it cannot recover processes orphaned before collection began.
+  current tree is not an exit. Untagged identities survive only that collector's
+  lifetime. Provider and terminal launches inherit a marker scoped to the T3 home
+  and thread, so a fresh collector can recover tagged survivors. Only new process
+  identities have their environment inspected; environment contents are discarded
+  after extracting the bounded marker. Scrubbed environments, external provider
+  servers and processes launched before tagging are not recoverable this way.
 - Snapshot sequence numbers belong to a monitor generation. Comparing them across
   restarts would discard the new monitor's samples until its sequence caught up.
 - Sampling can miss a process that starts and exits between samples. Cumulative

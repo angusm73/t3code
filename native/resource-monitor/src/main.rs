@@ -49,6 +49,8 @@ enum Command {
         sample_interval_ms: u64,
         #[serde(default)]
         external_processes: Vec<ExternalProcess>,
+        #[serde(default)]
+        ownership_key: Option<String>,
     },
     SetExternalProcesses {
         version: u32,
@@ -150,6 +152,131 @@ struct ProcessSample {
     io_write_bytes: u64,
     io_semantics: IoSemantics,
     origin: ProcessOrigin,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner: Option<ProcessOwner>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessOwner {
+    thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnershipMarker {
+    version: u8,
+    environment_key: String,
+    #[serde(flatten)]
+    owner: ProcessOwner,
+}
+
+fn parse_process_owner(value: &str, key: &str) -> Option<ProcessOwner> {
+    if value.len() > 2_048 {
+        return None;
+    }
+    let marker: OwnershipMarker = serde_json::from_str(value).ok()?;
+    let valid_id = |id: &str| !id.is_empty() && id.len() <= 1_024 && id.trim() == id;
+    (marker.version == 1
+        && marker.environment_key == key
+        && valid_id(&marker.owner.thread_id)
+        && marker.owner.terminal_id.as_deref().is_none_or(valid_id))
+    .then_some(marker.owner)
+}
+
+#[derive(Default)]
+struct OwnerDiscovery {
+    seen: HashMap<u32, u64>,
+    owners: HashMap<u32, (u64, ProcessOwner)>,
+}
+
+impl OwnerDiscovery {
+    fn refresh(&mut self, rows: &[(u32, u32, u64)], key: &str) {
+        let starts = rows
+            .iter()
+            .map(|(pid, _, start)| (*pid, *start))
+            .collect::<HashMap<_, _>>();
+        self.owners
+            .retain(|pid, (start, _)| starts.get(pid) == Some(start));
+        let new_pids = rows
+            .iter()
+            .filter_map(|(pid, _, start)| {
+                (self.seen.get(pid) != Some(start)).then_some(Pid::from_u32(*pid))
+            })
+            .collect::<Vec<_>>();
+        if !new_pids.is_empty() {
+            // Inspect each new identity once, then drop all environment data.
+            // Only the bounded T3 marker is retained or sent to clients.
+            let mut details = System::new();
+            let monitor_pid = Pid::from_u32(std::process::id());
+            let mut detail_pids = new_pids.clone();
+            if !detail_pids.contains(&monitor_pid) {
+                detail_pids.push(monitor_pid);
+            }
+            details.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&detail_pids),
+                true,
+                ProcessRefreshKind::nothing()
+                    .without_tasks()
+                    .with_environ(UpdateKind::Always),
+            );
+            let epoch_offset = details
+                .process(monitor_pid)
+                .zip(starts.get(&monitor_pid.as_u32()))
+                .map(|(process, start)| {
+                    i128::from(process.start_time()) - i128::from(start / 1_000)
+                });
+            for pid in new_pids {
+                let Some(process) = details.process(pid) else {
+                    continue;
+                };
+                let Some(start) = starts.get(&pid.as_u32()).copied() else {
+                    continue;
+                };
+                if !epoch_offset.is_some_and(|offset| {
+                    matches_process_start_time(start / 1_000, process.start_time(), offset)
+                }) {
+                    continue;
+                }
+                let owner = process.environ().iter().find_map(|entry| {
+                    entry
+                        .to_str()?
+                        .strip_prefix("T3CODE_PROCESS_OWNER=")
+                        .and_then(|value| parse_process_owner(value, key))
+                });
+                if let Some(owner) = owner {
+                    self.owners.insert(pid.as_u32(), (start, owner));
+                }
+            }
+        }
+        self.seen = starts;
+        self.inherit(rows);
+    }
+
+    fn inherit(&mut self, rows: &[(u32, u32, u64)]) {
+        let mut children = HashMap::<u32, Vec<(u32, u64)>>::new();
+        for (pid, ppid, start) in rows {
+            children.entry(*ppid).or_default().push((*pid, *start));
+        }
+        let mut queue = self
+            .owners
+            .iter()
+            .map(|(pid, (start, owner))| (*pid, *start, owner.clone()))
+            .collect::<VecDeque<_>>();
+        while let Some((pid, start, owner)) = queue.pop_front() {
+            for (child, child_start) in children.get(&pid).into_iter().flatten() {
+                if *child_start < start || self.owners.contains_key(child) {
+                    continue;
+                }
+                self.owners.insert(*child, (*child_start, owner.clone()));
+                queue.push_back((*child, *child_start, owner.clone()));
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -230,6 +357,10 @@ impl ProcessSample {
             .saturating_add(self.name.len())
             .saturating_add(self.command.len())
             .saturating_add(self.status.len())
+            .saturating_add(self.cwd.as_ref().map_or(0, String::len))
+            .saturating_add(self.owner.as_ref().map_or(0, |owner| {
+                owner.thread_id.len() + owner.terminal_id.as_ref().map_or(0, String::len)
+            }))
     }
 }
 
@@ -302,6 +433,7 @@ struct CollectorConfig {
     root_pid: u32,
     sample_interval: Option<Duration>,
     external_processes: HashMap<u32, Option<u64>>,
+    ownership_key: Option<String>,
 }
 
 #[derive(Default)]
@@ -410,6 +542,7 @@ struct Collector {
     sequence: u64,
     cpu_baseline_refreshed_at: Option<Instant>,
     tracker: ProcessTracker,
+    ownership: OwnerDiscovery,
 }
 
 impl Collector {
@@ -419,6 +552,7 @@ impl Collector {
             sequence: 0,
             cpu_baseline_refreshed_at: None,
             tracker: ProcessTracker::default(),
+            ownership: OwnerDiscovery::default(),
         }
     }
 
@@ -490,6 +624,14 @@ impl Collector {
                 (pid, ppid, process.start_time().saturating_mul(1_000))
             })
             .collect::<Vec<_>>();
+        if let Some(key) = &config.ownership_key {
+            self.ownership.refresh(&rows, key);
+            for (pid, (start, _)) in &self.ownership.owners {
+                self.tracker
+                    .identities
+                    .insert(*pid, (*start, ProcessOrigin::Backend));
+            }
+        }
         let external_processes = config
             .external_processes
             .iter()
@@ -591,6 +733,17 @@ impl Collector {
                     io_write_bytes: disk_usage.total_written_bytes,
                     io_semantics: io_semantics(),
                     origin: self.tracker.identities[&pid].1,
+                    owner: self
+                        .ownership
+                        .owners
+                        .get(&pid)
+                        .map(|(_, owner)| owner.clone()),
+                    cwd: details.cwd().map(|cwd| {
+                        truncate_utf8(
+                            cwd.to_string_lossy().into_owned(),
+                            MAX_PROCESS_COMMAND_BYTES,
+                        )
+                    }),
                 })
             })
             .collect::<Vec<_>>();
@@ -629,6 +782,7 @@ fn process_discovery_refresh_kind() -> ProcessRefreshKind {
 fn process_refresh_kind() -> ProcessRefreshKind {
     ProcessRefreshKind::nothing()
         .with_memory()
+        .with_cwd(UpdateKind::Always)
         .with_cpu()
         .with_disk_usage()
         .with_cmd(UpdateKind::Always)
@@ -918,12 +1072,20 @@ fn main() -> io::Result<()> {
                         root_pid,
                         sample_interval_ms,
                         external_processes,
+                        ownership_key,
                         ..
                     } => {
+                        if config.as_ref().is_some_and(|old| {
+                            old.root_pid != root_pid || old.ownership_key != ownership_key
+                        }) {
+                            collector.ownership = OwnerDiscovery::default();
+                            collector.tracker = ProcessTracker::default();
+                        }
                         let sample_interval = clamp_sample_interval(sample_interval_ms);
                         config = Some(CollectorConfig {
                             root_pid,
                             sample_interval,
+                            ownership_key,
                             external_processes: external_processes
                                 .into_iter()
                                 .map(|process| (process.pid, process.start_time_ms))
@@ -1060,6 +1222,104 @@ mod tests {
     }
 
     #[test]
+    fn accepts_only_valid_markers_from_this_environment() {
+        let valid = r#"{"version":1,"environmentKey":"local","threadId":"thread-1","terminalId":"terminal-1"}"#;
+        assert_eq!(
+            parse_process_owner(valid, "local").unwrap().thread_id,
+            "thread-1"
+        );
+        assert!(parse_process_owner(valid, "other").is_none());
+        assert!(parse_process_owner("not json", "local").is_none());
+        assert!(parse_process_owner(&valid.replace("thread-1", " "), "local").is_none());
+        assert!(
+            parse_process_owner(&valid.replace("\"version\":1", "\"version\":2"), "local")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn inherits_ownership_without_overwriting_a_childs_explicit_thread() {
+        let mut discovery = OwnerDiscovery::default();
+        let owner = |id: &str| ProcessOwner {
+            thread_id: id.to_owned(),
+            terminal_id: None,
+        };
+        discovery.owners.insert(10, (100, owner("first")));
+        discovery.owners.insert(12, (120, owner("second")));
+        discovery.inherit(&[
+            (10, 1, 100),
+            (11, 10, 110),
+            (12, 10, 120),
+            (13, 12, 130),
+            (14, 10, 90),
+        ]);
+        assert_eq!(discovery.owners[&11].1.thread_id, "first");
+        assert_eq!(discovery.owners[&13].1.thread_id, "second");
+        assert!(!discovery.owners.contains_key(&14));
+    }
+
+    #[test]
+    fn ownership_fixture() {
+        if std::env::var_os("T3_RESOURCE_OWNERSHIP_FIXTURE").is_none() {
+            return;
+        }
+        println!("t3-ownership-fixture-ready");
+        let mut finish = String::new();
+        io::stdin().read_line(&mut finish).unwrap();
+    }
+
+    #[test]
+    fn recovers_a_tagged_process_when_a_new_collector_has_no_ancestry() {
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::ownership_fixture", "--nocapture"])
+            .env("T3_RESOURCE_OWNERSHIP_FIXTURE", "1")
+            .env(
+                "T3CODE_PROCESS_OWNER",
+                r#"{"version":1,"environmentKey":"recovery-test","threadId":"recovered-thread"}"#,
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn fixture");
+        let pid = child.id();
+        let mut output = io::BufReader::new(child.stdout.take().unwrap());
+        let ready = loop {
+            let mut line = String::new();
+            if output.read_line(&mut line).unwrap() == 0 {
+                break false;
+            }
+            if line.contains("t3-ownership-fixture-ready") {
+                break true;
+            }
+        };
+        let config = CollectorConfig {
+            root_pid: u32::MAX,
+            sample_interval: None,
+            external_processes: HashMap::new(),
+            ownership_key: Some("recovery-test".to_owned()),
+        };
+        let first = Collector::new().sample(&config, None);
+        let restarted = Collector::new().sample(&config, None);
+        drop(child.stdin.take());
+        let status = child.wait().expect("fixture exited");
+        assert!(status.success());
+        assert!(ready, "fixture ready");
+        for snapshot in [first, restarted] {
+            let process = snapshot
+                .processes
+                .iter()
+                .find(|process| process.pid == pid)
+                .expect("recovered process");
+            assert_eq!(
+                process.owner.as_ref().unwrap().thread_id,
+                "recovered-thread"
+            );
+            assert_eq!(process.origin, ProcessOrigin::Backend);
+        }
+    }
+
+    #[test]
     fn does_not_follow_a_reused_orphan_pid() {
         let mut tracker = ProcessTracker::default();
         tracker.select(&[(10, 1, 100), (11, 10, 110)], 10, &HashSet::new());
@@ -1122,6 +1382,7 @@ mod tests {
             root_pid: u32::MAX,
             sample_interval: None,
             external_processes: HashMap::new(),
+            ownership_key: None,
         };
         assert!(collector.sample(&config, None).processes.is_empty());
 
@@ -1318,6 +1579,8 @@ mod tests {
             io_write_bytes: 0,
             io_semantics: IoSemantics::Storage,
             origin: ProcessOrigin::Backend,
+            owner: None,
+            cwd: None,
         };
         let snapshot_bytes =
             std::mem::size_of::<SnapshotEvent>() + process.estimated_history_bytes();

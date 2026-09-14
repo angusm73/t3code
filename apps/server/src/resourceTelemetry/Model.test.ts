@@ -3,6 +3,7 @@ import {
   type DesktopHostTelemetrySnapshot,
   type ResourceMonitorProcessSample,
   type ResourceMonitorSnapshotEvent,
+  ThreadId,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
@@ -111,6 +112,25 @@ function merge(input: {
 }
 
 describe("resource telemetry process model", () => {
+  it("carries recovered thread ownership and working directory into diagnostics", () => {
+    const owner = { threadId: ThreadId.make("recovered-thread"), terminalId: "terminal-1" };
+    const result = merge({
+      native: nativeSnapshot(BASE_TIME_MS, [
+        processSample({
+          pid: 200,
+          ppid: 1,
+          startTimeMs: 1_000,
+          origin: "backend",
+          owner,
+          cwd: "/worktree",
+        }),
+      ]),
+    });
+    expect(result.processes[0]?.owner).toEqual(owner);
+    expect(result.processes[0]?.cwd).toBe("/worktree");
+    expect(result.processes[0]?.category).toBe("server-child");
+  });
+
   it("keeps reparented processes in their original groups without recording false exits", () => {
     const samples = [
       processSample({ pid: SERVER_PID, ppid: 1, startTimeMs: 1_000, origin: "backend" }),
